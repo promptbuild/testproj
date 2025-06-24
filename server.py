@@ -186,7 +186,7 @@ class AttendanceServer:
         self.SERVER_PORT = int(os.getenv('PORT', 5000))
         
         # Initialize with admin if not exists
-        if not self.db.fetch_one('SELECT 1 FROM teachers WHERE id = ?', ('admin',)):
+        if not self.db.fetch_one('SELECT 1 FROM teachers WHERE id = %s', ('admin',)):
             self._create_admin_account()
         
         # Start background threads
@@ -195,7 +195,7 @@ class AttendanceServer:
     def _create_admin_account(self):
         self.db.execute(
             'INSERT INTO teachers (id, password, email, name, classrooms, bssid_mapping, branches, semesters) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            'VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
             (
                 'admin',
                 generate_password_hash('admin'),
@@ -213,7 +213,7 @@ class AttendanceServer:
         if not self.db.fetch_one('SELECT 1 FROM students LIMIT 1'):
             self.db.execute(
                 'INSERT INTO students (id, password, name, classroom, branch, semester, attendance) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                'VALUES (%s, %s, %s, %s, %s, %s, %s)',
                 (
                     's001',
                     generate_password_hash('student123'),
@@ -227,7 +227,7 @@ class AttendanceServer:
             )
             self.db.execute(
                 'INSERT INTO students (id, password, name, classroom, branch, semester, attendance) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                'VALUES (%s, %s, %s, %s, %s, %s, %s)',
                 (
                     's002',
                     generate_password_hash('student123'),
@@ -242,7 +242,7 @@ class AttendanceServer:
             
             # Create sample timetable
             self.db.execute(
-                'INSERT INTO timetables (branch, semester, timetable) VALUES (?, ?, ?)',
+                'INSERT INTO timetables (branch, semester, timetable) VALUES (%s, %s, %s)',
                 (
                     'CSE',
                     3,
@@ -271,21 +271,21 @@ class AttendanceServer:
             current_time = datetime.now().timestamp()
             
             with self.lock:
-                timers = self.db.fetch_all('SELECT * FROM timers WHERE status = ?', ('running',))
+                timers = self.db.fetch_all('SELECT * FROM timers WHERE status = %s', ('running',))
                 for timer in timers:
                     elapsed = current_time - timer['start_time']
                     remaining = max(0, timer['duration'] - elapsed)
                     
                     if remaining <= 0:
                         self.db.execute(
-                            'UPDATE timers SET status = ?, remaining = ? WHERE student_id = ?',
+                            'UPDATE timers SET status = %s, remaining = %s WHERE student_id = %s',
                             ('completed', 0, timer['student_id']),
                             commit=True
                         )
                         self.record_attendance(timer['student_id'])
                     else:
                         self.db.execute(
-                            'UPDATE timers SET remaining = ? WHERE student_id = ?',
+                            'UPDATE timers SET remaining = %s WHERE student_id = %s',
                             (remaining, timer['student_id']),
                             commit=True
                         )
@@ -295,17 +295,17 @@ class AttendanceServer:
     def record_attendance(self, student_id):
         """Record attendance for completed timer"""
         with self.lock:
-            student = self.db.fetch_one('SELECT * FROM students WHERE id = ?', (student_id,))
+            student = self.db.fetch_one('SELECT * FROM students WHERE id = %s', (student_id,))
             if not student:
                 return
             
-            timer = self.db.fetch_one('SELECT * FROM timers WHERE student_id = ?', (student_id,))
+            timer = self.db.fetch_one('SELECT * FROM timers WHERE student_id = %s', (student_id,))
             if not timer or timer['status'] != 'completed':
                 return
             
             # Check authorization
             checkin = self.db.fetch_one(
-                'SELECT * FROM checkins WHERE student_id = ? ORDER BY timestamp DESC LIMIT 1',
+                'SELECT * FROM checkins WHERE student_id = %s ORDER BY timestamp DESC LIMIT 1',
                 (student_id,)
             )
             
@@ -330,7 +330,7 @@ class AttendanceServer:
             }
             
             self.db.execute(
-                'UPDATE students SET attendance = ? WHERE id = ?',
+                'UPDATE students SET attendance = %s WHERE id = %s',
                 (json.dumps(attendance), student_id),
                 commit=True
             )
@@ -342,7 +342,7 @@ class AttendanceServer:
             
             with self.lock:
                 self.db.execute(
-                    'DELETE FROM checkins WHERE timestamp < ?',
+                    'DELETE FROM checkins WHERE timestamp < %s',
                     (threshold,),
                     commit=True
                 )
@@ -356,24 +356,24 @@ class AttendanceServer:
             
             with self.lock:
                 inactive_devices = self.db.fetch_all(
-                    'SELECT student_id FROM active_devices WHERE last_activity < ?',
+                    'SELECT student_id FROM active_devices WHERE last_activity < %s',
                     (threshold,)
                 )
                 
                 for device in inactive_devices:
                     student_id = device['student_id']
                     self.db.execute(
-                        'DELETE FROM active_devices WHERE student_id = ?',
+                        'DELETE FROM active_devices WHERE student_id = %s',
                         (student_id,),
                         commit=True
                     )
                     self.db.execute(
-                        'DELETE FROM checkins WHERE student_id = ?',
+                        'DELETE FROM checkins WHERE student_id = %s',
                         (student_id,),
                         commit=True
                     )
                     self.db.execute(
-                        'DELETE FROM timers WHERE student_id = ?',
+                        'DELETE FROM timers WHERE student_id = %s',
                         (student_id,),
                         commit=True
                     )
@@ -383,19 +383,19 @@ class AttendanceServer:
     def start_timer(self, student_id):
         """Start timer for a student"""
         with self.lock:
-            if not self.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+            if not self.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
                 return False
             
-            existing_timer = self.db.fetch_one('SELECT 1 FROM timers WHERE student_id = ?', (student_id,))
+            existing_timer = self.db.fetch_one('SELECT 1 FROM timers WHERE student_id = %s', (student_id,))
             if existing_timer:
                 self.db.execute(
-                    'UPDATE timers SET status = ?, start_time = ?, duration = ?, remaining = ? WHERE student_id = ?',
+                    'UPDATE timers SET status = %s, start_time = %s, duration = %s, remaining = %s WHERE student_id = %s',
                     ('running', datetime.now().timestamp(), self.TIMER_DURATION, self.TIMER_DURATION, student_id),
                     commit=True
                 )
             else:
                 self.db.execute(
-                    'INSERT INTO timers (student_id, status, start_time, duration, remaining) VALUES (?, ?, ?, ?, ?)',
+                    'INSERT INTO timers (student_id, status, start_time, duration, remaining) VALUES (%s, %s, %s, %s, %s)',
                     (student_id, 'running', datetime.now().timestamp(), self.TIMER_DURATION, self.TIMER_DURATION),
                     commit=True
                 )
@@ -426,15 +426,13 @@ def teacher_signup():
         return jsonify({'error': 'All fields are required'}), 400
     
     with server.lock:
-        if server.db.fetch_one('SELECT 1 FROM teachers WHERE id = ?', (teacher_id,)):
+        if server.db.fetch_one('SELECT 1 FROM teachers WHERE id = %s', (teacher_id,)):
             return jsonify({'error': 'Teacher ID already exists'}), 400
-        
-        if server.db.fetch_one('SELECT 1 FROM teachers WHERE email = ?', (email,)):
+        if server.db.fetch_one('SELECT 1 FROM teachers WHERE email = %s', (email,)):
             return jsonify({'error': 'Email already registered'}), 400
-        
         server.db.execute(
             'INSERT INTO teachers (id, password, email, name, classrooms, bssid_mapping, branches, semesters) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            'VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
             (
                 teacher_id,
                 generate_password_hash(password),
@@ -459,7 +457,7 @@ def teacher_login():
     if not all([teacher_id, password]):
         return jsonify({'error': 'ID and password are required'}), 400
     
-    teacher = server.db.fetch_one('SELECT * FROM teachers WHERE id = ?', (teacher_id,))
+    teacher = server.db.fetch_one('SELECT * FROM teachers WHERE id = %s', (teacher_id,))
     if not teacher:
         return jsonify({'error': 'Teacher not found'}), 404
     
@@ -492,12 +490,12 @@ def register_student():
         return jsonify({'error': 'All fields are required'}), 400
     
     with server.lock:
-        if server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student ID already exists'}), 400
         
         server.db.execute(
             'INSERT INTO students (id, password, name, classroom, branch, semester, attendance) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'VALUES (%s, %s, %s, %s, %s, %s, %s)',
             (
                 student_id,
                 generate_password_hash(password),
@@ -523,13 +521,13 @@ def get_students():
     conditions = []
     
     if classroom:
-        conditions.append('classroom = ?')
+        conditions.append('classroom = %s')
         params.append(classroom)
     if branch:
-        conditions.append('branch = ?')
+        conditions.append('branch = %s')
         params.append(branch)
     if semester:
-        conditions.append('semester = ?')
+        conditions.append('semester = %s')
         params.append(semester)
     
     if conditions:
@@ -557,7 +555,7 @@ def update_student():
         return jsonify({'error': 'Student ID and new data are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         # Build update query
@@ -566,18 +564,17 @@ def update_student():
         
         for key, value in new_data.items():
             if key in ['name', 'classroom', 'branch', 'semester']:
-                set_clauses.append(f'{key} = ?')
+                set_clauses.append(f'{key} = %s')
                 params.append(value)
             elif key == 'attendance':
-                set_clauses.append('attendance = ?')
+                set_clauses.append('attendance = %s')
                 params.append(json.dumps(value))
         
         if not set_clauses:
             return jsonify({'error': 'No valid fields to update'}), 400
         
-        query = f'UPDATE students SET {", ".join(set_clauses)} WHERE id = ?'
+        query = f'UPDATE students SET {", ".join(set_clauses)} WHERE id = %s'
         params.append(student_id)
-        
         server.db.execute(query, params, commit=True)
         
         return jsonify({'message': 'Student updated successfully'}), 200
@@ -591,15 +588,15 @@ def delete_student():
         return jsonify({'error': 'Student ID is required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         # Delete all related data
-        server.db.execute('DELETE FROM students WHERE id = ?', (student_id,))
-        server.db.execute('DELETE FROM checkins WHERE student_id = ?', (student_id,))
-        server.db.execute('DELETE FROM timers WHERE student_id = ?', (student_id,))
-        server.db.execute('DELETE FROM active_devices WHERE student_id = ?', (student_id,))
-        server.db.execute('DELETE FROM manual_overrides WHERE student_id = ?', (student_id,))
+        server.db.execute('DELETE FROM students WHERE id = %s', (student_id,))
+        server.db.execute('DELETE FROM checkins WHERE student_id = %s', (student_id,))
+        server.db.execute('DELETE FROM timers WHERE student_id = %s', (student_id,))
+        server.db.execute('DELETE FROM active_devices WHERE student_id = %s', (student_id,))
+        server.db.execute('DELETE FROM manual_overrides WHERE student_id = %s', (student_id,))
         server.db.commit()
         
         return jsonify({'message': 'Student deleted successfully'}), 200
@@ -614,7 +611,7 @@ def update_teacher_profile():
         return jsonify({'error': 'Teacher ID and new data are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM teachers WHERE id = ?', (teacher_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM teachers WHERE id = %s', (teacher_id,)):
             return jsonify({'error': 'Teacher not found'}), 404
         
         # Build update query
@@ -623,18 +620,17 @@ def update_teacher_profile():
         
         for key, value in new_data.items():
             if key in ['email', 'name']:
-                set_clauses.append(f'{key} = ?')
+                set_clauses.append(f'{key} = %s')
                 params.append(value)
             elif key in ['classrooms', 'bssid_mapping', 'branches', 'semesters']:
-                set_clauses.append(f'{key} = ?')
+                set_clauses.append(f'{key} = %s')
                 params.append(json.dumps(value))
         
         if not set_clauses:
             return jsonify({'error': 'No valid fields to update'}), 400
         
-        query = f'UPDATE teachers SET {", ".join(set_clauses)} WHERE id = ?'
+        query = f'UPDATE teachers SET {", ".join(set_clauses)} WHERE id = %s'
         params.append(teacher_id)
-        
         server.db.execute(query, params, commit=True)
         
         return jsonify({'message': 'Profile updated successfully'}), 200
@@ -650,15 +646,14 @@ def change_teacher_password():
         return jsonify({'error': 'All fields are required'}), 400
     
     with server.lock:
-        teacher = server.db.fetch_one('SELECT * FROM teachers WHERE id = ?', (teacher_id,))
+        teacher = server.db.fetch_one('SELECT * FROM teachers WHERE id = %s', (teacher_id,))
         if not teacher:
             return jsonify({'error': 'Teacher not found'}), 404
         
         if not check_password_hash(teacher['password'], old_password):
             return jsonify({'error': 'Incorrect current password'}), 401
-        
         server.db.execute(
-            'UPDATE teachers SET password = ? WHERE id = ?',
+            'UPDATE teachers SET password = %s WHERE id = %s',
             (generate_password_hash(new_password), teacher_id),
             commit=True
         )
@@ -676,7 +671,7 @@ def update_bssid_mapping():
         return jsonify({'error': 'Teacher ID and classroom are required'}), 400
     
     with server.lock:
-        teacher = server.db.fetch_one('SELECT * FROM teachers WHERE id = ?', (teacher_id,))
+        teacher = server.db.fetch_one('SELECT * FROM teachers WHERE id = %s', (teacher_id,))
         if not teacher:
             return jsonify({'error': 'Teacher not found'}), 404        
         # Get current bssid_mapping
@@ -687,7 +682,7 @@ def update_bssid_mapping():
         
         # Update teacher record
         server.db.execute(
-            'UPDATE teachers SET bssid_mapping = ? WHERE id = ?',
+            'UPDATE teachers SET bssid_mapping = %s WHERE id = %s',
             (json.dumps(bssid_mapping), teacher_id),
             commit=True
         )
@@ -697,7 +692,7 @@ def update_bssid_mapping():
         if classroom not in classrooms:
             classrooms.append(classroom)
             server.db.execute(
-                'UPDATE teachers SET classrooms = ? WHERE id = ?',
+                'UPDATE teachers SET classrooms = %s WHERE id = %s',
                 (json.dumps(classrooms), teacher_id),
                 commit=True
             )
@@ -706,7 +701,7 @@ def update_bssid_mapping():
         settings = server.db.fetch_one('SELECT authorized_bssid FROM server_settings')
         if settings['authorized_bssid'] == bssid_mapping.get(classroom):
             server.db.execute(
-                'UPDATE server_settings SET authorized_bssid = ?',
+                'UPDATE server_settings SET authorized_bssid = %s',
                 (bssid,),
                 commit=True
             )
@@ -729,12 +724,12 @@ def start_session():
         return jsonify({'error': 'Teacher ID, classroom and subject are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM teachers WHERE id = ?', (teacher_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM teachers WHERE id = %s', (teacher_id,)):
             return jsonify({'error': 'Teacher not found'}), 404
         
         # Check for existing active session in this classroom
         active_session = server.db.fetch_one(
-            'SELECT 1 FROM sessions WHERE classroom = ? AND end_time IS NULL',
+            'SELECT 1 FROM sessions WHERE classroom = %s AND end_time IS NULL',
             (classroom,)
         )
         if active_session:
@@ -745,7 +740,7 @@ def start_session():
         
         server.db.execute(
             'INSERT INTO sessions (id, teacher_id, classroom, subject, branch, semester, start_time, ad_hoc) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            'VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
             (
                 session_id,
                 teacher_id,
@@ -760,13 +755,13 @@ def start_session():
         )
         
         # Set authorized BSSID from teacher's mapping
-        teacher = server.db.fetch_one('SELECT bssid_mapping FROM teachers WHERE id = ?', (teacher_id,))
+        teacher = server.db.fetch_one('SELECT bssid_mapping FROM teachers WHERE id = %s', (teacher_id,))
         bssid_mapping = json.loads(teacher['bssid_mapping'])
         authorized_bssid = bssid_mapping.get(classroom)
         
         if authorized_bssid:
             server.db.execute(
-                'UPDATE server_settings SET authorized_bssid = ?',
+                'UPDATE server_settings SET authorized_bssid = %s',
                 (authorized_bssid,),
                 commit=True
             )
@@ -786,7 +781,7 @@ def end_session():
         return jsonify({'error': 'Session ID is required'}), 400
     
     with server.lock:
-        session = server.db.fetch_one('SELECT * FROM sessions WHERE id = ?', (session_id,))
+        session = server.db.fetch_one('SELECT * FROM sessions WHERE id = %s', (session_id,))
         if not session or session['end_time']:
             return jsonify({'error': 'Session not found or already ended'}), 404
         
@@ -794,7 +789,7 @@ def end_session():
         
         # Update session
         server.db.execute(
-            'UPDATE sessions SET end_time = ? WHERE id = ?',
+            'UPDATE sessions SET end_time = %s WHERE id = %s',
             (end_time, session_id),
             commit=True
         )
@@ -806,14 +801,14 @@ def end_session():
         
         checkins = server.db.fetch_all(
             'SELECT * FROM checkins WHERE student_id IN '
-            '(SELECT id FROM students WHERE classroom = ?) '
-            'AND timestamp BETWEEN ? AND ?',
+            '(SELECT id FROM students WHERE classroom = %s) '
+            'AND timestamp BETWEEN %s AND %s',
             (classroom, session['start_time'], end_time)
         )
         
         for checkin in checkins:
             student_id = checkin['student_id']
-            student = server.db.fetch_one('SELECT * FROM students WHERE id = ?', (student_id,))
+            student = server.db.fetch_one('SELECT * FROM students WHERE id = %s', (student_id,))
             if not student:
                 continue
             
@@ -838,7 +833,7 @@ def end_session():
             }
             
             server.db.execute(
-                'UPDATE students SET attendance = ? WHERE id = ?',
+                'UPDATE students SET attendance = %s WHERE id = %s',
                 (json.dumps(attendance), student_id),
                 commit=True
             )
@@ -861,10 +856,10 @@ def get_sessions():
     conditions = []
     
     if teacher_id:
-        conditions.append('teacher_id = ?')
+        conditions.append('teacher_id = %s')
         params.append(teacher_id)
     if classroom:
-        conditions.append('classroom = ?')
+        conditions.append('classroom = %s')
         params.append(classroom)
     
     if conditions:
@@ -884,7 +879,7 @@ def get_active_sessions():
     params = []
     
     if teacher_id:
-        query += ' AND teacher_id = ?'
+        query += ' AND teacher_id = %s'
         params.append(teacher_id)
     
     with server.lock:
@@ -903,7 +898,7 @@ def set_bssid():
     
     with server.lock:
         server.db.execute(
-            'UPDATE server_settings SET authorized_bssid = ?',
+            'UPDATE server_settings SET authorized_bssid = %s',
             (bssid,),
             commit=True
         )
@@ -922,7 +917,7 @@ def get_status():
     query = 'SELECT * FROM students'
     params = []
     if classroom:
-        query += ' WHERE classroom = ?'
+        query += ' WHERE classroom = %s'
         params.append(classroom)
     
     with server.lock:
@@ -933,12 +928,12 @@ def get_status():
             
             # Get checkin
             checkin = server.db.fetch_one(
-                'SELECT * FROM checkins WHERE student_id = ? ORDER BY timestamp DESC LIMIT 1',
+                'SELECT * FROM checkins WHERE student_id = %s ORDER BY timestamp DESC LIMIT 1',
                 (student_id,)
             )
             
             # Get timer
-            timer = server.db.fetch_one('SELECT * FROM timers WHERE student_id = ?', (student_id,))
+            timer = server.db.fetch_one('SELECT * FROM timers WHERE student_id = %s', (student_id,))
             
             authorized_bssid = status['authorized_bssid']
             is_authorized = checkin and checkin['bssid'] == authorized_bssid
@@ -973,21 +968,21 @@ def manual_override():
         return jsonify({'error': 'Status must be "present" or "absent"'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         # Check if override exists
-        existing = server.db.fetch_one('SELECT 1 FROM manual_overrides WHERE student_id = ?', (student_id,))
+        existing = server.db.fetch_one('SELECT 1 FROM manual_overrides WHERE student_id = %s', (student_id,))
         
         if existing:
             server.db.execute(
-                'UPDATE manual_overrides SET status = ? WHERE student_id = ?',
+                'UPDATE manual_overrides SET status = %s WHERE student_id = %s',
                 (status, student_id),
                 commit=True
             )
         else:
             server.db.execute(
-                'INSERT INTO manual_overrides (student_id, status) VALUES (?, ?)',
+                'INSERT INTO manual_overrides (student_id, status) VALUES (%s, %s)',
                 (student_id, status),
                 commit=True
             )
@@ -1007,7 +1002,7 @@ def random_ring():
     with server.lock:
         # Get all students in classroom with attendance data
         students = server.db.fetch_all(
-            'SELECT id, name, attendance FROM students WHERE classroom = ?',
+            'SELECT id, name, attendance FROM students WHERE classroom = %s',
             (classroom,)
         )
         
@@ -1070,7 +1065,7 @@ def update_special_dates():
     
     with server.lock:
         server.db.execute(
-            'INSERT INTO special_dates (holidays, special_schedules) VALUES (?, ?)',
+            'INSERT INTO special_dates (holidays, special_schedules) VALUES (%s, %s)',
             (json.dumps(holidays), json.dumps(special_dates)),
             commit=True
         )
@@ -1087,7 +1082,7 @@ def get_timetable():
     
     with server.lock:
         timetable = server.db.fetch_one(
-            'SELECT timetable FROM timetables WHERE branch = ? AND semester = ?',
+            'SELECT timetable FROM timetables WHERE branch = %s AND semester = %s',
             (branch, semester)
         )
         
@@ -1108,19 +1103,19 @@ def update_timetable():
     
     with server.lock:
         existing = server.db.fetch_one(
-            'SELECT 1 FROM timetables WHERE branch = ? AND semester = ?',
+            'SELECT 1 FROM timetables WHERE branch = %s AND semester = %s',
             (branch, semester)
         )
         
         if existing:
             server.db.execute(
-                'UPDATE timetables SET timetable = ? WHERE branch = ? AND semester = ?',
+                'UPDATE timetables SET timetable = %s WHERE branch = %s AND semester = %s',
                 (json.dumps(timetable), branch, semester),
                 commit=True
             )
         else:
             server.db.execute(
-                'INSERT INTO timetables (branch, semester, timetable) VALUES (?, ?, ?)',
+                'INSERT INTO timetables (branch, semester, timetable) VALUES (%s, %s, %s)',
                 (branch, semester, json.dumps(timetable)),
                 commit=True
             )
@@ -1139,7 +1134,7 @@ def student_login():
         return jsonify({'error': 'ID, password and device ID are required'}), 400
     
     with server.lock:
-        student = server.db.fetch_one('SELECT * FROM students WHERE id = ?', (student_id,))
+        student = server.db.fetch_one('SELECT * FROM students WHERE id = %s', (student_id,))
         if not student:
             return jsonify({'error': 'Student not found'}), 404
         
@@ -1148,7 +1143,7 @@ def student_login():
         
         # Check if already logged in on another device
         active_device = server.db.fetch_one(
-            'SELECT * FROM active_devices WHERE student_id = ? AND device_id != ?',
+            'SELECT * FROM active_devices WHERE student_id = %s AND device_id != %s',
             (student_id, device_id)
         )
         if active_device:
@@ -1156,19 +1151,19 @@ def student_login():
         
         # Update or insert active device
         existing = server.db.fetch_one(
-            'SELECT 1 FROM active_devices WHERE student_id = ?',
+            'SELECT 1 FROM active_devices WHERE student_id = %s',
             (student_id,)
         )
         
         if existing:
             server.db.execute(
-                'UPDATE active_devices SET device_id = ?, last_activity = ? WHERE student_id = ?',
+                'UPDATE active_devices SET device_id = %s, last_activity = %s WHERE student_id = %s',
                 (device_id, datetime.now().isoformat(), student_id),
                 commit=True
             )
         else:
             server.db.execute(
-                'INSERT INTO active_devices (student_id, device_id, last_activity) VALUES (?, ?, ?)',
+                'INSERT INTO active_devices (student_id, device_id, last_activity) VALUES (%s, %s, %s)',
                 (student_id, device_id, datetime.now().isoformat()),
                 commit=True
             )
@@ -1207,11 +1202,11 @@ def student_checkin():
         return jsonify({'error': 'Student ID and device ID are required'}), 400
 
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
 
         active_device = server.db.fetch_one(
-            'SELECT 1 FROM active_devices WHERE student_id = ? AND device_id = ?',
+            'SELECT 1 FROM active_devices WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         )
         if not active_device:
@@ -1219,32 +1214,32 @@ def student_checkin():
 
         # Update last activity
         server.db.execute(
-            'UPDATE active_devices SET last_activity = ? WHERE student_id = ?',
+            'UPDATE active_devices SET last_activity = %s WHERE student_id = %s',
             (datetime.now().isoformat(), student_id),
             commit=True
         )
 
         # Record checkin
         existing_checkin = server.db.fetch_one(
-            'SELECT 1 FROM checkins WHERE student_id = ? AND device_id = ?',
+            'SELECT 1 FROM checkins WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         )
         
         if existing_checkin:
             server.db.execute(
-                'UPDATE checkins SET timestamp = ?, bssid = ? WHERE student_id = ? AND device_id = ?',
+                'UPDATE checkins SET timestamp = %s, bssid = %s WHERE student_id = %s AND device_id = %s',
                 (datetime.now().isoformat(), bssid, student_id, device_id),
                 commit=True
             )
         else:
             server.db.execute(
-                'INSERT INTO checkins (student_id, timestamp, bssid, device_id) VALUES (?, ?, ?, ?)',
+                'INSERT INTO checkins (student_id, timestamp, bssid, device_id) VALUES (%s, %s, %s, %s)',
                 (student_id, datetime.now().isoformat(), bssid, device_id),
                 commit=True
             )
 
         # Get authorized BSSID for student's classroom
-        student = server.db.fetch_one('SELECT classroom FROM students WHERE id = ?', (student_id,))
+        student = server.db.fetch_one('SELECT classroom FROM students WHERE id = %s', (student_id,))
         classroom = student['classroom']
         
         teacher = server.db.fetch_one(
@@ -1276,23 +1271,23 @@ def student_start_timer():
         return jsonify({'error': 'Student ID and device ID are required'}), 400
 
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
 
         if not server.db.fetch_one(
-            'SELECT 1 FROM active_devices WHERE student_id = ? AND device_id = ?',
+            'SELECT 1 FROM active_devices WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         ):
             return jsonify({'error': 'Unauthorized device'}), 403
 
         # Check authorization via latest checkin
         checkin = server.db.fetch_one(
-            'SELECT * FROM checkins WHERE student_id = ? ORDER BY timestamp DESC LIMIT 1',
+            'SELECT * FROM checkins WHERE student_id = %s ORDER BY timestamp DESC LIMIT 1',
             (student_id,)
         )
 
         # Get authorized BSSID for student's classroom
-        student = server.db.fetch_one('SELECT classroom FROM students WHERE id = ?', (student_id,))
+        student = server.db.fetch_one('SELECT classroom FROM students WHERE id = %s', (student_id,))
         classroom = student['classroom']
         
         teacher = server.db.fetch_one(
@@ -1310,7 +1305,7 @@ def student_start_timer():
 
         # Update last activity
         server.db.execute(
-            'UPDATE active_devices SET last_activity = ? WHERE student_id = ?',
+            'UPDATE active_devices SET last_activity = %s WHERE student_id = %s',
             (datetime.now().isoformat(), student_id),
             commit=True
         )
@@ -1332,22 +1327,22 @@ def student_stop_timer():
         return jsonify({'error': 'Student ID and device ID are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         if not server.db.fetch_one(
-            'SELECT 1 FROM active_devices WHERE student_id = ? AND device_id = ?',
+            'SELECT 1 FROM active_devices WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         ):
             return jsonify({'error': 'Unauthorized device'}), 403
         
-        timer = server.db.fetch_one('SELECT * FROM timers WHERE student_id = ?', (student_id,))
+        timer = server.db.fetch_one('SELECT * FROM timers WHERE student_id = %s', (student_id,))
         if not timer or timer['status'] == 'stop':
             return jsonify({'error': 'No active timer to stop'}), 400
         
         # Update last activity
         server.db.execute(
-            'UPDATE active_devices SET last_activity = ? WHERE student_id = ?',
+            'UPDATE active_devices SET last_activity = %s WHERE student_id = %s',
             (datetime.now().isoformat(), student_id),
             commit=True
         )
@@ -1356,7 +1351,7 @@ def student_stop_timer():
             server.record_attendance(student_id)
         
         server.db.execute(
-            'UPDATE timers SET status = ?, remaining = 0 WHERE student_id = ?',
+            'UPDATE timers SET status = %s, remaining = 0 WHERE student_id = %s',
             ('stop', student_id),
             commit=True
         )
@@ -1375,38 +1370,38 @@ def student_get_status():
         return jsonify({'error': 'Student ID and device ID are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         if not server.db.fetch_one(
-            'SELECT 1 FROM active_devices WHERE student_id = ? AND device_id = ?',
+            'SELECT 1 FROM active_devices WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         ):
             return jsonify({'error': 'Unauthorized device'}), 403
         
         # Update last activity
         server.db.execute(
-            'UPDATE active_devices SET last_activity = ? WHERE student_id = ?',
+            'UPDATE active_devices SET last_activity = %s WHERE student_id = %s',
             (datetime.now().isoformat(), student_id),
             commit=True
         )
         
         # Get checkin
         checkin = server.db.fetch_one(
-            'SELECT * FROM checkins WHERE student_id = ? ORDER BY timestamp DESC LIMIT 1',
+            'SELECT * FROM checkins WHERE student_id = %s ORDER BY timestamp DESC LIMIT 1',
             (student_id,)
         )
         
         # Get timer
-        timer = server.db.fetch_one('SELECT * FROM timers WHERE student_id = ?', (student_id,))
+        timer = server.db.fetch_one('SELECT * FROM timers WHERE student_id = %s', (student_id,))
         
         authorized_bssid = server.db.fetch_one('SELECT authorized_bssid FROM server_settings')['authorized_bssid']
         is_authorized = checkin and checkin['bssid'] == authorized_bssid
         
         status = {
             'student_id': student_id,
-            'name': server.db.fetch_one('SELECT name FROM students WHERE id = ?', (student_id,))['name'],
-            'classroom': server.db.fetch_one('SELECT classroom FROM students WHERE id = ?', (student_id,))['classroom'],
+            'name': server.db.fetch_one('SELECT name FROM students WHERE id = %s', (student_id,))['name'],
+            'classroom': server.db.fetch_one('SELECT classroom FROM students WHERE id = %s', (student_id,))['classroom'],
             'connected': checkin is not None,
             'authorized': is_authorized,
             'timestamp': checkin['timestamp'] if checkin else None,
@@ -1428,23 +1423,23 @@ def student_get_attendance():
         return jsonify({'error': 'Student ID and device ID are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         if not server.db.fetch_one(
-            'SELECT 1 FROM active_devices WHERE student_id = ? AND device_id = ?',
+            'SELECT 1 FROM active_devices WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         ):
             return jsonify({'error': 'Unauthorized device'}), 403
         
         # Update last activity
         server.db.execute(
-            'UPDATE active_devices SET last_activity = ? WHERE student_id = ?',
+            'UPDATE active_devices SET last_activity = %s WHERE student_id = %s',
             (datetime.now().isoformat(), student_id),
             commit=True
         )
         
-        student = server.db.fetch_one('SELECT attendance FROM students WHERE id = ?', (student_id,))
+        student = server.db.fetch_one('SELECT attendance FROM students WHERE id = %s', (student_id,))
         
         return jsonify({
             'attendance': json.loads(student['attendance']) if student['attendance'] else {}
@@ -1459,11 +1454,11 @@ def get_active_session():
         return jsonify({'error': 'Student ID and classroom are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         session = server.db.fetch_one(
-            'SELECT * FROM sessions WHERE classroom = ? AND end_time IS NULL',
+            'SELECT * FROM sessions WHERE classroom = %s AND end_time IS NULL',
             (classroom,)
         )
         
@@ -1485,10 +1480,10 @@ def student_get_timetable():
         return jsonify({'error': 'Student ID, branch and semester are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404        
         timetable = server.db.fetch_one(
-            'SELECT timetable FROM timetables WHERE branch = ? AND semester = ?',
+            'SELECT timetable FROM timetables WHERE branch = %s AND semester = %s',
             (branch, semester)
         )
         
@@ -1511,17 +1506,17 @@ def student_ping():
         return jsonify({'error': 'Student ID and device ID are required'}), 400
     
     with server.lock:
-        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = ?', (student_id,)):
+        if not server.db.fetch_one('SELECT 1 FROM students WHERE id = %s', (student_id,)):
             return jsonify({'error': 'Student not found'}), 404
         
         if not server.db.fetch_one(
-            'SELECT 1 FROM active_devices WHERE student_id = ? AND device_id = ?',
+            'SELECT 1 FROM active_devices WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         ):
             return jsonify({'error': 'Unauthorized device'}), 403
         
         server.db.execute(
-            'UPDATE active_devices SET last_activity = ? WHERE student_id = ?',
+            'UPDATE active_devices SET last_activity = %s WHERE student_id = %s',
             (datetime.now().isoformat(), student_id),
             commit=True
         )
@@ -1540,24 +1535,24 @@ def cleanup_dead_sessions():
     with server.lock:
         # Only cleanup if the device matches
         device = server.db.fetch_one(
-            'SELECT * FROM active_devices WHERE student_id = ? AND device_id = ?',
+            'SELECT * FROM active_devices WHERE student_id = %s AND device_id = %s',
             (student_id, device_id)
         )
         if device:
             server.db.execute(
-                'DELETE FROM active_devices WHERE student_id = ?',
+                'DELETE FROM active_devices WHERE student_id = %s',
                 (student_id,),
                 commit=True
             )
         
         server.db.execute(
-            'DELETE FROM checkins WHERE student_id = ?',
+            'DELETE FROM checkins WHERE student_id = %s',
             (student_id,),
             commit=True
         )
         
         server.db.execute(
-            'DELETE FROM timers WHERE student_id = ?',
+            'DELETE FROM timers WHERE student_id = %s',
             (student_id,),
             commit=True
         )
